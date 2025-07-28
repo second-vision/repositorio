@@ -446,8 +446,46 @@ class WifiConfigCharacteristic(Characteristic):
                          in_signature='a{sv}',
                          out_signature='ay')
     def ReadValue(self, options):
-        status_str = f"Conectado a: {self.current_ssid if self.current_ssid else 'Nenhum'}"
-        return [dbus.Byte(b) for b in status_str.encode('utf-8')]
+    """
+    Verifica o status REAL da conexão Wi-Fi a cada leitura.
+    """
+    try:
+        # Comando para listar as redes Wi-Fi ativas no formato "terse" (fácil de parsear)
+        # -t -> terse (curto)
+        # -f -> fields (campos)
+        # Pede os campos ACTIVE e SSID dos dispositivos Wi-Fi
+        cmd = ["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"]
+        
+        # Executa o comando e captura a saída
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        
+        active_ssid = None
+        # A saída será algo como:
+        # yes:MinhaRede1
+        # no:OutraRede2
+        for line in result.stdout.strip().split('\n'):
+            if line.startswith('yes:'):
+                # Extrai o SSID da linha que começa com "yes:"
+                active_ssid = line.split(':', 1)[1]
+                break # Encontrou a conexão ativa, pode parar
+
+        if active_ssid:
+            status_str = f"Conectado a: {active_ssid}"
+            print(f"ReadValue: Retornando status real: {status_str}")
+        else:
+            status_str = "Conectado a: Nenhum"
+            print("ReadValue: Nenhuma conexão Wi-Fi ativa encontrada.")
+
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        # Se o comando falhar ou nmcli não for encontrado
+        print(f"ReadValue: Erro ao verificar status com nmcli: {e}")
+        status_str = "Erro ao verificar status"
+    except Exception as e:
+        print(f"ReadValue: Erro inesperado: {e}")
+        status_str = "Erro inesperado no servidor"
+
+    # Retorna o status como um array de bytes
+    return [dbus.Byte(b) for b in status_str.encode('utf-8')]
 
 
 def register_app_cb():
