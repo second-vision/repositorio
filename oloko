@@ -1,0 +1,46 @@
+ def _connect_wifi_task(self, ssid, password):
+        """Esta função será executada em uma thread separada."""
+        print(f"WifiConfig [Thread]: Iniciando conexão para SSID: {ssid}")
+        try:
+            # Tenta remover uma conexão existente
+            subprocess.run(["sudo", "nmcli", "connection", "delete", ssid], check=False, capture_output=True)
+            
+            # Adiciona a nova conexão
+            cmd = ["sudo", "nmcli", "device", "wifi", "connect", ssid, "password", password, "ifname", "wlan0", "name", ssid]
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            
+            print(f"WifiConfig [Thread]: nmcli connect output: {result.stdout}")
+            self.current_ssid = ssid # Cuidado com race conditions se for crítico ler isso imediatamente
+            print(f"WifiConfig [Thread]: Conexão Wi-Fi para '{ssid}' configurada com sucesso.")
+
+        except subprocess.CalledProcessError as e:
+            print(f"WifiConfig [Thread]: Erro ao configurar Wi-Fi com nmcli: {e}")
+            print(f"nmcli stderr: {e.stderr}")
+        except Exception as e:
+            print(f"WifiConfig [Thread]: Erro inesperado na tarefa de conexão: {e}")
+
+    @dbus.service.method(GATT_CHRC_IFACE, in_signature='aya{sv}', out_signature='')     
+    def WriteValue(self, value, options):
+        try:
+            json_str = bytes(value).decode('utf-8')
+            print(f"WifiConfig: Received JSON string: {json_str}")
+            data = json.loads(json_str)
+            ssid = data.get('ssid')
+            password = data.get('password')
+
+            if ssid and password:
+                print("WifiConfig: Dados válidos. Disparando tarefa de conexão em segundo plano.")
+                
+                # Inicia a função de conexão em uma nova thread
+                thread = threading.Thread(target=self._connect_wifi_task, args=(ssid, password))
+                thread.daemon = True  # Permite que o programa principal saia mesmo se a thread estiver rodando
+                thread.start()
+
+                # Retorna imediatamente para o BlueZ enviar o ACK de sucesso
+                return
+            else:
+                raise exceptions.InvalidArgsException("SSID ou senha ausentes")
+
+        except Exception as e:
+            print(f"WifiConfig: Erro geral ao processar WriteValue: {e}")
+            raise exceptions.FailedException("Erro ao processar o pedido.")
