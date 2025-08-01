@@ -36,11 +36,11 @@ except Exception as e:
     print(f"Erro ao inicializar INA219: {e}")
 
 class Application(dbus.service.Object):
-    def __init__(self, bus):
+    def __init__(self, bus, connection_event):
         self.path = '/'
         self.services = []
         dbus.service.Object.__init__(self, bus, self.path)
-        self.add_service(TestService(bus, 0, ina219))
+        self.add_service(TestService(bus, 0, ina219, connection_event))
 
     def get_path(self):
         return dbus.ObjectPath(self.path)
@@ -196,13 +196,13 @@ class Characteristic(dbus.service.Object):
 class TestService(Service):
     TEST_SVC_UUID = '12345678-1234-5678-1234-56789abcdef0'
 
-    def __init__(self, bus, index, ina219):
+    def __init__(self, bus, index, ina219, connection_event):
         Service.__init__(self, bus, index, self.TEST_SVC_UUID, True)
         self.add_characteristic(YoloCharacteristic(bus, 0, self))
         self.add_characteristic(OcrPaddle(bus, 1, self))
         self.add_characteristic(ShutdownCharacteristic(bus, 2, self))
         self.add_characteristic(BatteryCharacteristic(bus, 3, self, ina219))
-        self.add_characteristic(WifiConfigCharacteristic(bus, 4, self))
+        self.add_characteristic(WifiConfigCharacteristic(bus, 4, self, connection_event))
 
 
 class YoloCharacteristic(Characteristic):
@@ -391,6 +391,8 @@ class WifiConfigCharacteristic(Characteristic):
             ['write', 'read'], # Write para receber, Read para status (opcional)
             service)
         self.current_ssid = None # Para feedback via ReadValue
+        self.connection_event = connection_event # Armazene o evento
+
 
     @dbus.service.method(GATT_CHRC_IFACE,
                          in_signature='aya{sv}',
@@ -415,6 +417,8 @@ class WifiConfigCharacteristic(Characteristic):
             print(f"nmcli stderr: {e.stderr}")
         except Exception as e:
             print(f"WifiConfig [Thread]: Erro inesperado na tarefa de conexão: {e}")
+        finally:
+            self.connection_event.set()
 
     @dbus.service.method(GATT_CHRC_IFACE, in_signature='aya{sv}', out_signature='')     
     def WriteValue(self, value, options):
@@ -446,46 +450,46 @@ class WifiConfigCharacteristic(Characteristic):
                          in_signature='a{sv}',
                          out_signature='ay')
     def ReadValue(self, options):
-    """
-    Verifica o status REAL da conexão Wi-Fi a cada leitura.
-    """
-    try:
-        # Comando para listar as redes Wi-Fi ativas no formato "terse" (fácil de parsear)
-        # -t -> terse (curto)
-        # -f -> fields (campos)
-        # Pede os campos ACTIVE e SSID dos dispositivos Wi-Fi
-        cmd = ["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"]
+        """
+        Verifica o status REAL da conexão Wi-Fi a cada leitura.
+        """
+        try:
+            # Comando para listar as redes Wi-Fi ativas no formato "terse" (fácil de parsear)
+            # -t -> terse (curto)
+            # -f -> fields (campos)
+            # Pede os campos ACTIVE e SSID dos dispositivos Wi-Fi
+            cmd = ["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"]
         
-        # Executa o comando e captura a saída
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            # Executa o comando e captura a saída
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         
-        active_ssid = None
-        # A saída será algo como:
-        # yes:MinhaRede1
-        # no:OutraRede2
-        for line in result.stdout.strip().split('\n'):
-            if line.startswith('yes:'):
-                # Extrai o SSID da linha que começa com "yes:"
-                active_ssid = line.split(':', 1)[1]
-                break # Encontrou a conexão ativa, pode parar
+            active_ssid = None
+            # A saída será algo como:
+            # yes:MinhaRede1
+            # no:OutraRede2
+            for line in result.stdout.strip().split('\n'):
+                if line.startswith('yes:'):
+                    # Extrai o SSID da linha que começa com "yes:"
+                    active_ssid = line.split(':', 1)[1]
+                    break # Encontrou a conexão ativa, pode parar
 
-        if active_ssid:
-            status_str = f"Conectado a: {active_ssid}"
-            print(f"ReadValue: Retornando status real: {status_str}")
-        else:
-            status_str = "Conectado a: Nenhum"
-            print("ReadValue: Nenhuma conexão Wi-Fi ativa encontrada.")
+            if active_ssid:
+                status_str = f"Conectado a: {active_ssid}"
+                print(f"ReadValue: Retornando status real: {status_str}")
+            else:
+                status_str = "Conectado a: Nenhum"
+                print("ReadValue: Nenhuma conexão Wi-Fi ativa encontrada.")
 
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        # Se o comando falhar ou nmcli não for encontrado
-        print(f"ReadValue: Erro ao verificar status com nmcli: {e}")
-        status_str = "Erro ao verificar status"
-    except Exception as e:
-        print(f"ReadValue: Erro inesperado: {e}")
-        status_str = "Erro inesperado no servidor"
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            # Se o comando falhar ou nmcli não for encontrado
+            print(f"ReadValue: Erro ao verificar status com nmcli: {e}")
+            status_str = "Erro ao verificar status"
+        except Exception as e:
+            print(f"ReadValue: Erro inesperado: {e}")
+            status_str = "Erro inesperado no servidor"
 
-    # Retorna o status como um array de bytes
-    return [dbus.Byte(b) for b in status_str.encode('utf-8')]
+        # Retorna o status como um array de bytes
+        return [dbus.Byte(b) for b in status_str.encode('utf-8')]
 
 
 def register_app_cb():
@@ -496,8 +500,32 @@ def register_app_error_cb(mainloop, error):
     print('Failed to register application: ' + str(error))
     mainloop.quit()
 
+def is_internet_available():
+    """
+    Verifica o status REAL da conexão Wi-Fi. Retorna True se conectado, False caso contrário.
+    Esta função encapsula a lógica do ReadValue para ser reutilizável.
+    """
+    try:
+        # Comando para verificar se há uma conexão ativa com o NetworkManager
+        cmd = ["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        
+        # Procura por uma linha que comece com "yes:", indicando uma conexão ativa.
+        for line in result.stdout.strip().split('\n'):
+            if line.startswith('yes:'):
+                return True # Conexão ativa encontrada
+        
+        # Se o loop terminar, nenhuma conexão ativa foi encontrada
+        return False
+        
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # O comando falhou ou nmcli não foi encontrado
+        return False
+    except Exception as e:
+        print(f"[Internet Check] Erro inesperado: {e}")
+        return False
 
-def gatt_server_main(mainloop, bus, adapter_name):
+def gatt_server_main(mainloop, bus, adapter_name, connection_event):
     adapter = adapters.find_adapter(bus, GATT_MANAGER_IFACE, adapter_name)
     if not adapter:
         raise Exception('GattManager1 interface not found')
@@ -505,9 +533,8 @@ def gatt_server_main(mainloop, bus, adapter_name):
         bus.get_object(BLUEZ_SERVICE_NAME, adapter),
         GATT_MANAGER_IFACE)
 
-    app = Application(bus)
-
-    app.add_service(TestService(bus, 0, ina219))
+    app = Application(bus, connection_event)
+    
     print('Registering GATT application...')
     service_manager.RegisterApplication(app.get_path(), {},
                                         reply_handler=register_app_cb,
