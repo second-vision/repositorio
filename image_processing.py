@@ -182,7 +182,7 @@ def get_objects_from_cloud_api(frame):
     return mock_api_results
 
 
-def camera_capture_loop(characteristic_objects, characteristic_texts):
+def camera_capture_loop(characteristic_objects, characteristic_texts, shared_state):
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Erro ao acessar a câmera")

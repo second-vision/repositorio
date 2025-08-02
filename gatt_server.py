@@ -384,7 +384,7 @@ class ShutdownCharacteristic(Characteristic):
 class WifiConfigCharacteristic(Characteristic):
     WIFI_CONFIG_UUID = '12345678-1234-5678-1234-56789abcdef5' 
 
-    def __init__(self, bus, index, service):
+    def __init__(self, bus, index, service, connection_event):
         Characteristic.__init__(
             self, bus, index,
             self.WIFI_CONFIG_UUID,
