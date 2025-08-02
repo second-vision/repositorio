@@ -33,8 +33,8 @@ def internet_status_updater_loop(state, event, app_instance):
     Thread que verifica a conexão com a internet periodicamente e atualiza o estado compartilhado.
     """
     while True:
-        app_instance.wifi_characteristic.update_and_notify_status()
-        status_str = app_instance.wifi_characteristic.last_known_status_str
+        app_instance.wifi_status_characteristic.update_and_notify_status()
+        status_str = app_instance.wifi_status_characteristic.last_known_status_str
         is_connected = "Nenhum" not in status_str
         
         if is_connected != state.get('internet_connected'):
