@@ -454,12 +454,48 @@ class WifiConfigCharacteristic(Characteristic):
         finally:
             self.connection_event.set()
 
-    @dbus.service.method(GATT_CHRC_IFACE, in_signature='aya{sv}', out_signature='')     
+    @dbus.service.method(GATT_CHRC_IFACE, in_signature='aya{sv}', out_signature='')
+
+    def _disconnect_wifi_task(self):
+        """Task para desconectar de todas as redes Wi-Fi gerenciadas por nmcli."""
+        print("[WifiConfig] Iniciando tarefa de desconexão...")
+        try:
+            # Lista todas as conexões ativas
+            list_cmd = ["nmcli", "-t", "-f", "NAME,DEVICE", "connection", "show", "--active"]
+            result = subprocess.run(list_cmd, capture_output=True, text=True, check=True)
+
+            # Procura por conexões na interface wlan0
+            for line in result.stdout.strip().split('\n'):
+                if 'wlan0' in line:
+                    connection_name = line.split(':')[0]
+                    print(f"[WifiConfig] Desativando conexão: {connection_name}")
+                    # Desativa a conexão
+                    disconnect_cmd = ["sudo", "nmcli", "connection", "down", connection_name]
+                    subprocess.run(disconnect_cmd, check=True)
+            
+            print("[WifiConfig] Todas as conexões Wi-Fi ativas foram desativadas.")
+
+        except Exception as e:
+            print(f"[WifiConfig Thread] Erro ao desconectar: {e}")
+        finally:
+            # Força uma nova verificação de status para notificar o app
+            self.connection_event.set()
+            
+    @dbus.service.method(GATT_CHRC_IFACE, in_signature='aya{sv}', out_signature='')
+    
     def WriteValue(self, value, options):
         try:
             json_str = bytes(value).decode('utf-8')
             print(f"WifiConfig: Received JSON string: {json_str}")
             data = json.loads(json_str)
+
+            # Verifica se é um comando para ficar offline
+            if data.get('command') == 'offline':
+                thread = threading.Thread(target=self._disconnect_wifi_task)
+                thread.daemon = True
+                thread.start()
+                return
+                
             ssid = data.get('ssid')
             password = data.get('password')
 
