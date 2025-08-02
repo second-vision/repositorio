@@ -388,14 +388,12 @@ class ShutdownCharacteristic(Characteristic):
 class WifiStatusCharacteristic(Characteristic):
     WIFI_STATUS_UUID = '12345678-1234-5678-1234-56789abcdef5' 
 
-    def __init__(self, bus, index, service, connection_event):
+    def __init__(self, bus, index, service):
         Characteristic.__init__(
             self, bus, index,
             self.WIFI_STATUS_UUID,
             ['read', 'notify'],
             service)
-        self.current_ssid = None # Para feedback via ReadValue
-        self.connection_event = connection_event # Armazene o evento
         self.last_known_status_str = "Inicializando..."
     
     def update_and_notify_status(self):
