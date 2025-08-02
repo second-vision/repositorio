@@ -40,7 +40,10 @@ class Application(dbus.service.Object):
         self.path = '/'
         self.services = []
         dbus.service.Object.__init__(self, bus, self.path)
-        self.add_service(TestService(bus, 0, ina219, connection_event))
+        service = TestService(bus, 0, ina219, connection_event)
+        self.add_service(service)
+        # Armazena uma referência direta à característica de Wi-Fi
+        self.wifi_characteristic = service.characteristics[4]
 
     def get_path(self):
         return dbus.ObjectPath(self.path)
@@ -392,11 +395,42 @@ class WifiConfigCharacteristic(Characteristic):
             service)
         self.current_ssid = None # Para feedback via ReadValue
         self.connection_event = connection_event # Armazene o evento
+        self.last_known_status_str = ""
 
 
     @dbus.service.method(GATT_CHRC_IFACE,
                          in_signature='aya{sv}',
-                         out_signature='')     
+                         out_signature='')   
+    
+    def update_and_notify_status(self):
+        """
+        Verifica o status da internet e, se mudou, envia uma notificação.
+        """
+        # Esta lógica é a mesma do seu ReadValue atual
+        try:
+            cmd = ["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            active_ssid = None
+            for line in result.stdout.strip().split('\n'):
+                if line.startswith('yes:'):
+                    active_ssid = line.split(':', 1)[1]
+                    break
+            
+            current_status_str = f"Conectado a: {active_ssid}" if active_ssid else "Conectado a: Nenhum"
+        
+        except Exception:
+            current_status_str = "Conectado a: Nenhum" # Em caso de erro, assume desconectado
+        
+        # AQUI ESTÁ A LÓGICA DE NOTIFICAÇÃO
+        if current_status_str != self.last_known_status_str:
+            print(f"[WIFI Notify] Status mudou: '{self.last_known_status_str}' -> '{current_status_str}'. Enviando notificação.")
+            self.last_known_status_str = current_status_str
+            # Chama o método send_update da classe base para enviar a notificação
+            self.send_update(current_status_str)
+
+    @dbus.service.method(GATT_CHRC_IFACE, in_signature='a{sv}', out_signature='ay')
+
+    
     def _connect_wifi_task(self, ssid, password):
         """Esta função será executada em uma thread separada."""
         print(f"WifiConfig [Thread]: Iniciando conexão para SSID: {ssid}")
@@ -450,46 +484,7 @@ class WifiConfigCharacteristic(Characteristic):
                          in_signature='a{sv}',
                          out_signature='ay')
     def ReadValue(self, options):
-        """
-        Verifica o status REAL da conexão Wi-Fi a cada leitura.
-        """
-        try:
-            # Comando para listar as redes Wi-Fi ativas no formato "terse" (fácil de parsear)
-            # -t -> terse (curto)
-            # -f -> fields (campos)
-            # Pede os campos ACTIVE e SSID dos dispositivos Wi-Fi
-            cmd = ["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"]
-        
-            # Executa o comando e captura a saída
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        
-            active_ssid = None
-            # A saída será algo como:
-            # yes:MinhaRede1
-            # no:OutraRede2
-            for line in result.stdout.strip().split('\n'):
-                if line.startswith('yes:'):
-                    # Extrai o SSID da linha que começa com "yes:"
-                    active_ssid = line.split(':', 1)[1]
-                    break # Encontrou a conexão ativa, pode parar
-
-            if active_ssid:
-                status_str = f"Conectado a: {active_ssid}"
-                print(f"ReadValue: Retornando status real: {status_str}")
-            else:
-                status_str = "Conectado a: Nenhum"
-                print("ReadValue: Nenhuma conexão Wi-Fi ativa encontrada.")
-
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            # Se o comando falhar ou nmcli não for encontrado
-            print(f"ReadValue: Erro ao verificar status com nmcli: {e}")
-            status_str = "Erro ao verificar status"
-        except Exception as e:
-            print(f"ReadValue: Erro inesperado: {e}")
-            status_str = "Erro inesperado no servidor"
-
-        # Retorna o status como um array de bytes
-        return [dbus.Byte(b) for b in status_str.encode('utf-8')]
+        return [dbus.Byte(b) for b in self.last_known_status_str.encode('utf-8')]
 
 
 def register_app_cb():
