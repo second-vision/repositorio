@@ -396,11 +396,6 @@ class WifiConfigCharacteristic(Characteristic):
         self.current_ssid = None # Para feedback via ReadValue
         self.connection_event = connection_event # Armazene o evento
         self.last_known_status_str = ""
-
-
-    @dbus.service.method(GATT_CHRC_IFACE,
-                         in_signature='aya{sv}',
-                         out_signature='')   
     
     def update_and_notify_status(self):
         """
@@ -428,8 +423,6 @@ class WifiConfigCharacteristic(Characteristic):
             # Chama o método send_update da classe base para enviar a notificação
             self.send_update(current_status_str)
 
-    @dbus.service.method(GATT_CHRC_IFACE, in_signature='a{sv}', out_signature='ay')
-
     
     def _connect_wifi_task(self, ssid, password):
         """Esta função será executada em uma thread separada."""
@@ -453,8 +446,6 @@ class WifiConfigCharacteristic(Characteristic):
             print(f"WifiConfig [Thread]: Erro inesperado na tarefa de conexão: {e}")
         finally:
             self.connection_event.set()
-
-    @dbus.service.method(GATT_CHRC_IFACE, in_signature='aya{sv}', out_signature='')
 
     def _disconnect_wifi_task(self):
         """Task para desconectar de todas as redes Wi-Fi gerenciadas por nmcli."""
