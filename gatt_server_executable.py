@@ -28,23 +28,20 @@ shared_state = {'internet_connected': False}
 internet_check_event = threading.Event()
 
 
-def internet_status_updater_loop(state, event):
+def internet_status_updater_loop(state, event, app_instance):
     """
     Thread que verifica a conexão com a internet periodicamente e atualiza o estado compartilhado.
     """
     while True:
-        status = gatt_server.is_internet_available() 
-        if status != state.get('internet_connected'):
-            print(f"[Internet Check] Status da internet mudou para: {'Conectado' if status else 'Desconectado'}")
-            state['internet_connected'] = status
+        app_instance.wifi_characteristic.update_and_notify_status()
+        status_str = app_instance.wifi_characteristic.last_known_status_str
+        is_connected = "Nenhum" not in status_str
         
-        # AQUI ESTÁ A MUDANÇA:
-        # Em vez de time.sleep(15), esperamos pelo evento por 15 segundos.
-        # Se o evento for sinalizado (event.set() for chamado), a espera termina imediatamente.
-        # Se não, ela termina após 15 segundos (timeout).
-        print("[Internet Check] Aguardando 15s ou sinal para nova verificação...")
+        if is_connected != state.get('internet_connected'):
+            print(f"[Internet Check] Status da internet mudou para: {'Conectado' if is_connected else 'Desconectado'}")
+            state['internet_connected'] = is_connected
+        
         event.wait(timeout=15)
-        # Limpa o sinal para a próxima iteração.
         event.clear()
 
 def main():
@@ -83,7 +80,7 @@ def main():
     battery_thread.start()
 
     # Inicia o NOVO thread para verificar o status da internet
-    internet_thread = threading.Thread(target=internet_status_updater_loop, args=(shared_state, internet_check_event))
+    internet_thread = threading.Thread(target=internet_status_updater_loop, args=(shared_state, internet_check_event, app))
     internet_thread.daemon = True
     internet_thread.start()
 
