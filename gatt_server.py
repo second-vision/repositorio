@@ -43,7 +43,7 @@ class Application(dbus.service.Object):
         service = TestService(bus, 0, ina219, connection_event)
         self.add_service(service)
         # Armazena uma referência direta à característica de Wi-Fi
-        self.wifi_characteristic = service.characteristics[4]
+        self.wifi_status_characteristic = service.characteristics[4]
 
     def get_path(self):
         return dbus.ObjectPath(self.path)
@@ -205,7 +205,8 @@ class TestService(Service):
         self.add_characteristic(OcrPaddle(bus, 1, self))
         self.add_characteristic(ShutdownCharacteristic(bus, 2, self))
         self.add_characteristic(BatteryCharacteristic(bus, 3, self, ina219))
-        self.add_characteristic(WifiConfigCharacteristic(bus, 4, self, connection_event))
+        self.add_characteristic(WifiStatusCharacteristic(bus, 4, self))
+        self.add_characteristic(WifiCommandCharacteristic(bus, 5, self, connection_event))
 
 
 class YoloCharacteristic(Characteristic):
@@ -384,18 +385,18 @@ class ShutdownCharacteristic(Characteristic):
         # Desliga o sistema operacional
         os.system('sudo shutdown now')
 
-class WifiConfigCharacteristic(Characteristic):
-    WIFI_CONFIG_UUID = '12345678-1234-5678-1234-56789abcdef5' 
+class WifiStatusCharacteristic(Characteristic):
+    WIFI_STATUS_UUID = '12345678-1234-5678-1234-56789abcdef5' 
 
     def __init__(self, bus, index, service, connection_event):
         Characteristic.__init__(
             self, bus, index,
-            self.WIFI_CONFIG_UUID,
-            ['write', 'read', 'notify'], # Write para receber, Read para status (opcional)
+            self.WIFI_STATUS_UUID,
+            ['read', 'notify'],
             service)
         self.current_ssid = None # Para feedback via ReadValue
         self.connection_event = connection_event # Armazene o evento
-        self.last_known_status_str = ""
+        self.last_known_status_str = "Inicializando..."
     
     def update_and_notify_status(self):
         """
@@ -423,7 +424,23 @@ class WifiConfigCharacteristic(Characteristic):
             # Chama o método send_update da classe base para enviar a notificação
             self.send_update(current_status_str)
 
+    @dbus.service.method(GATT_CHRC_IFACE,
+                         in_signature='a{sv}',
+                         out_signature='ay')
+    def ReadValue(self, options):
+        return [dbus.Byte(b) for b in self.last_known_status_str.encode('utf-8')]
+
+class WifiCommandCharacteristic(Characteristic):
+    WIFI_COMMAND_UUID = '12345678-1234-5678-1234-56789abcdef6' # NOVO UUID!
     
+    def __init__(self, bus, index, service, connection_event):
+        Characteristic.__init__(
+            self, bus, index,
+            self.WIFI_COMMAND_UUID,
+            ['write'], # Flag correta
+            service)
+        self.connection_event = connection_event
+
     def _connect_wifi_task(self, ssid, password):
         """Esta função será executada em uma thread separada."""
         print(f"WifiConfig [Thread]: Iniciando conexão para SSID: {ssid}")
@@ -506,12 +523,6 @@ class WifiConfigCharacteristic(Characteristic):
         except Exception as e:
             print(f"WifiConfig: Erro geral ao processar WriteValue: {e}")
             raise exceptions.FailedException("Erro ao processar o pedido.")
-
-    @dbus.service.method(GATT_CHRC_IFACE,
-                         in_signature='a{sv}',
-                         out_signature='ay')
-    def ReadValue(self, options):
-        return [dbus.Byte(b) for b in self.last_known_status_str.encode('utf-8')]
 
 
 def register_app_cb():
