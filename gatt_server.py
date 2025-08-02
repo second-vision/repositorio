@@ -391,7 +391,7 @@ class WifiConfigCharacteristic(Characteristic):
         Characteristic.__init__(
             self, bus, index,
             self.WIFI_CONFIG_UUID,
-            ['write', 'read'], # Write para receber, Read para status (opcional)
+            ['write', 'read', 'notify'], # Write para receber, Read para status (opcional)
             service)
         self.current_ssid = None # Para feedback via ReadValue
         self.connection_event = connection_event # Armazene o evento
